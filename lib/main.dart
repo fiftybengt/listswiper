@@ -4,13 +4,14 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/services.dart'; // Required for Clipboard handling
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key}); // Added super.key
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -34,15 +35,16 @@ class ListItem {
 }
 
 class ListScreen extends StatefulWidget {
-  const ListScreen({super.key}); // Added super.key
+  const ListScreen({super.key});
 
   @override
   ListScreenState createState() => ListScreenState();
 }
 
 class ListScreenState extends State<ListScreen> {
-  final List<ListItem> items = []; // Declared as final
+  final List<ListItem> items = [];
   final TextEditingController _controller = TextEditingController();
+  final FocusNode _focusNode = FocusNode(); // For automatic focus
   final Random random = Random();
   Color? lastColor;
   int colorIndex = 0;
@@ -60,36 +62,85 @@ class ListScreenState extends State<ListScreen> {
     Color(0xFFA5D6A7), // Light Teal
   ];
 
+  @override
+  void initState() {
+    super.initState();
+    _loadList(); // Load saved list
+  }
+
+  // Load the list from shared preferences
+  Future<void> _loadList() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? savedItems = prefs.getString('items');
+    if (savedItems != null) {
+      setState(() {
+        items.clear();
+        List<String> itemStrings = savedItems.split('|');
+        items.addAll(itemStrings.map((itemString) {
+          List<String> parts = itemString.split(',');
+          return ListItem(
+            parts[0],
+            isCompleted: parts[1] == 'true',
+            color: pastelColors[random.nextInt(pastelColors.length)],
+          );
+        }).toList());
+      });
+    }
+  }
+
+  // Save the list to shared preferences
+  Future<void> _saveList() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String itemsString = items.map((item) => '${item.text},${item.isCompleted}').join('|');
+    await prefs.setString('items', itemsString);
+  }
+
+  // Add an item and refocus on the text field
   void _addItem(String item) {
     setState(() {
       Color currentColor = pastelColors[colorIndex];
-
-      // Add the new item with the current color
       items.add(ListItem(item, color: currentColor));
-
-      // Update the color index, looping back to 0 if we reach the end of the list
       colorIndex = (colorIndex + 1) % pastelColors.length;
+      _saveList(); // Save the list after adding an item
     });
-
     _controller.clear();
-    FocusScope.of(context).requestFocus(FocusNode()); // Remove focus from the text field
+    _focusNode.requestFocus(); // Automatically focus on the text field again
   }
 
+  // Remove an item
   void _removeItem(int index) {
     setState(() {
       items.removeAt(index);
+      _saveList(); // Save the list after removing an item
     });
   }
 
+  // Toggle item completion and move completed items to the bottom
   void _toggleItemCompletion(int index) {
     setState(() {
       items[index].isCompleted = !items[index].isCompleted;
+      ListItem updatedItem = items.removeAt(index);
+
+      if (updatedItem.isCompleted) {
+        int firstCompletedIndex = items.indexWhere((item) => item.isCompleted);
+        if (firstCompletedIndex == -1) {
+          items.add(updatedItem); // No completed items, add to the end
+        } else {
+          items.insert(firstCompletedIndex, updatedItem); // Insert before first completed item
+        }
+      } else {
+        items.insert(0, updatedItem); // Move unchecked item to the top
+      }
+
+      _saveList(); // Save the list after toggling completion
     });
   }
 
+  // Clear all items
   void _clearAllItems() {
     setState(() {
       items.clear();
+      _saveList(); // Save the list after clearing
     });
   }
 
@@ -132,7 +183,7 @@ class ListScreenState extends State<ListScreen> {
       String decodedString = utf8.decode(base64Decode(code));
       List<String> itemStrings = decodedString.split('|');
       setState(() {
-        items.clear(); // Clear the existing items first
+        items.clear();
         items.addAll(itemStrings.map((itemString) {
           List<String> parts = itemString.split(',');
           Color randomColor;
@@ -145,8 +196,9 @@ class ListScreenState extends State<ListScreen> {
               isCompleted: parts[1] == 'true', color: randomColor);
         }).toList());
       });
+      _saveList(); // Save after importing
     } catch (e) {
-      debugPrint('Error importing list: $e'); // Use debugPrint instead of print
+      debugPrint('Error importing list: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Invalid code. Please try again.')),
       );
@@ -221,7 +273,6 @@ class ListScreenState extends State<ListScreen> {
     );
   }
 
-  // The missing build method is added here
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -244,6 +295,7 @@ class ListScreenState extends State<ListScreen> {
             padding: const EdgeInsets.all(8.0),
             child: TextField(
               controller: _controller,
+              focusNode: _focusNode, // Focus for adding items
               decoration: InputDecoration(
                 labelText: 'Add new item',
                 suffixIcon: IconButton(
