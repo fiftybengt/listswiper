@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
+import 'dart:math';
+import 'package:flutter/services.dart'; // Required for Clipboard handling
 
 void main() {
   runApp(MyApp());
@@ -22,25 +24,57 @@ class MyApp extends StatelessWidget {
 class ListItem {
   String text;
   bool isCompleted;
+  Color color;
 
-  ListItem(this.text, {this.isCompleted = false});
+  ListItem(this.text, {this.isCompleted = false, required this.color});
 }
 
 class ListScreen extends StatefulWidget {
   @override
   _ListScreenState createState() => _ListScreenState();
+  int colorIndex = 0;
 }
 
 class _ListScreenState extends State<ListScreen> {
   List<ListItem> items = [];
   TextEditingController _controller = TextEditingController();
+  Random random = Random();
+  Color? lastColor; // Keep track of the last color used
 
-  void _addItem(String item) {
-    setState(() {
-      items.add(ListItem(item));
-    });
-    _controller.clear();
-  }
+  // Add this line below your existing variables
+  int colorIndex = 0; // Track which color to use next
+
+  List<Color> pastelColors = [
+    Color(0xFFFFF9C4), // Light Yellow
+    Color(0xFFFFECB3), // Light Amber
+    Color(0xFFFFCCBC), // Light Red
+    Color(0xFFCFD8DC), // Light Blue-Grey
+    Color(0xFFC8E6C9), // Light Green
+    Color(0xFFB3E5FC), // Light Blue
+    Color(0xFFD1C4E9), // Light Purple
+    Color(0xFFF8BBD0), // Light Pink
+    Color(0xFFFFF176), // Light Lime
+    Color(0xFFA5D6A7), // Light Teal
+  ];
+
+
+void _addItem(String item) {
+  setState(() {
+    // Use the current color from the list
+    Color currentColor = pastelColors[colorIndex];
+
+    // Add the new item with the current color
+    items.add(ListItem(item, color: currentColor));
+
+    // Update the color index, looping back to 0 if we reach the end of the list
+    colorIndex = (colorIndex + 1) % pastelColors.length;
+  });
+
+  _controller.clear();
+  FocusScope.of(context).requestFocus(FocusNode()); // Remove focus from the text field
+}
+
+
 
   void _removeItem(int index) {
     setState(() {
@@ -54,8 +88,43 @@ class _ListScreenState extends State<ListScreen> {
     });
   }
 
+  void _clearAllItems() {
+    setState(() {
+      items.clear();
+    });
+  }
+
+  void _confirmClearAllItems() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Clear All Items'),
+          content: Text('Are you sure you want to delete all items?'),
+          actions: <Widget>[
+            TextButton(
+              child: Text('Cancel'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+            TextButton(
+              child: Text('Delete'),
+              onPressed: () {
+                _clearAllItems();
+                Navigator.of(context).pop();
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   String _generateShareableCode() {
-    String itemsString = items.map((item) => '${item.text},${item.isCompleted}').join('|');
+    String itemsString = items
+        .map((item) => '${item.text},${item.isCompleted}')
+        .join('|');
     return base64Encode(utf8.encode(itemsString));
   }
 
@@ -66,7 +135,14 @@ class _ListScreenState extends State<ListScreen> {
       setState(() {
         items = itemStrings.map((itemString) {
           List<String> parts = itemString.split(',');
-          return ListItem(parts[0], isCompleted: parts[1] == 'true');
+          Color randomColor;
+          do {
+            randomColor = pastelColors[random.nextInt(pastelColors.length)];
+          } while (randomColor == lastColor);
+          lastColor = randomColor;
+
+          return ListItem(parts[0],
+              isCompleted: parts[1] == 'true', color: randomColor);
         }).toList();
       });
     } catch (e) {
@@ -84,7 +160,22 @@ class _ListScreenState extends State<ListScreen> {
       builder: (BuildContext context) {
         return AlertDialog(
           title: Text('Share List'),
-          content: SelectableText(code),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SelectableText(code),
+              SizedBox(height: 10),
+              ElevatedButton(
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: code));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Code copied to clipboard!')),
+                  );
+                },
+                child: Text('Copy Code'),
+              ),
+            ],
+          ),
           actions: <Widget>[
             TextButton(
               child: Text('Close'),
@@ -108,6 +199,7 @@ class _ListScreenState extends State<ListScreen> {
           content: TextField(
             controller: importController,
             decoration: InputDecoration(hintText: "Enter the code here"),
+            autofocus: true, // Automatically focus on text input
           ),
           actions: <Widget>[
             TextButton(
@@ -127,15 +219,6 @@ class _ListScreenState extends State<ListScreen> {
         );
       },
     );
-  }
-
-  Color _getCompletedColor(int index) {
-    List<Color> pastelColors = [
-      Colors.yellow[100]!,
-      Colors.pink[100]!,
-      const Color.fromRGBO(200, 230, 201, 1)!,
-    ];
-    return pastelColors[index % pastelColors.length];
   }
 
   @override
@@ -185,22 +268,22 @@ class _ListScreenState extends State<ListScreen> {
                 return Dismissible(
                   key: Key(items[index].text),
                   background: Container(
-                    color: const Color.fromARGB(253, 128, 209, 131),
+                    color: const Color(0xFFCBE2B5), // Updated swipe color
                     child: Icon(Icons.check, color: Colors.white),
                     alignment: Alignment.centerLeft,
                     padding: EdgeInsets.only(left: 20),
                   ),
                   direction: DismissDirection.startToEnd,
                   onDismissed: (direction) {
-                    _removeItem(index);
+                    _removeItem(index); // Immediately remove the item from the list
                   },
                   child: GestureDetector(
                     onTap: () => _toggleItemCompletion(index),
                     child: Container(
                       decoration: BoxDecoration(
                         color: items[index].isCompleted
-                            ? _getCompletedColor(index)
-                            : null,
+                            ? Colors.grey[300] // Light gray when clicked
+                            : items[index].color, // Default item color
                         borderRadius: BorderRadius.circular(10),
                       ),
                       margin: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
@@ -224,6 +307,11 @@ class _ListScreenState extends State<ListScreen> {
             ),
           ),
         ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _confirmClearAllItems,
+        child: Icon(Icons.delete),
+        backgroundColor: const Color(0xFFFF938B),
       ),
     );
   }
